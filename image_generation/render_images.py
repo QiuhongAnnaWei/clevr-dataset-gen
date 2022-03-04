@@ -103,12 +103,12 @@ parser.add_argument('--output_scene_dir', default='../output/scenes/',
          "It will be created if it does not exist.")
 parser.add_argument('--output_scene_file', default='../output/CLEVR_scenes.json',
     help="Path to write a single JSON file containing all scene information")
-parser.add_argument('--output_blend_dir', default='output/blendfiles',
+parser.add_argument('--output_blend_dir', default='../output/blendfiles',
     help="The directory where blender scene files will be stored, if the " +
          "user requested that these files be saved using the " +
          "--save_blendfiles flag; in this case it will be created if it does " +
          "not already exist.")
-parser.add_argument('--save_blendfiles', type=int, default=0,
+parser.add_argument('--save_blendfiles', type=int, default=1,
     help="Setting --save_blendfiles 1 will cause the blender scene file for " +
          "each generated image to be stored in the directory specified by " +
          "the --output_blend_dir flag. These files are not saved by default " +
@@ -261,7 +261,11 @@ def render_scene(args,
   }
 
   # Put a plane on the ground so we can compute cardinal directions
-  bpy.ops.mesh.primitive_plane_add(radius=5)
+  # https://github.com/IBM/photorealistic-blocksworld/commit/b6a5cedca8ca79dc83e588cae3baf924355456fd
+  if bpy.app.version < (2, 80, 0):
+    bpy.ops.mesh.primitive_plane_add(radius=5)
+  else:
+    bpy.ops.mesh.primitive_plane_add(size=5)
   plane = bpy.context.object
 
   def rand(L):
@@ -276,9 +280,26 @@ def render_scene(args,
   # them in the scene structure
   camera = bpy.data.objects['Camera']
   plane_normal = plane.data.vertices[0].normal
-  cam_behind = camera.matrix_world.to_quaternion() * Vector((0, 0, -1))
-  cam_left = camera.matrix_world.to_quaternion() * Vector((-1, 0, 0))
-  cam_up = camera.matrix_world.to_quaternion() * Vector((0, 1, 0))
+  # print(camera.matrix_world) # same
+  # <Matrix 4x4 (0.6563, -0.3579,  0.6642,  7.4811)
+  #           (0.7545,  0.3114, -0.5778, -6.5076)
+  #           (0.0000,  0.8803,  0.4744,  5.3437)
+  #           (0.0000,  0.0000,  0.0000,  1.0000)>
+  print(camera.matrix_world.to_quaternion())
+  # <Quaternion (w=0.7814, x=0.4665, y=0.2125, z=0.3559)>
+  print(camera.matrix_world.to_quaternion() @ Vector((0, 0, -1)))
+  # <Vector (-0.6642, 0.5778, -0.4744)>
+  
+  # https://github.com/IBM/photorealistic-blocksworld/commit/7816279b43e71e90e70e5c18eb5001136b1172e0
+  if bpy.app.version < (2, 80, 0):
+    cam_behind = camera.matrix_world.to_quaternion() * Vector((0, 0, -1))
+    cam_left = camera.matrix_world.to_quaternion() * Vector((-1, 0, 0))
+    cam_up = camera.matrix_world.to_quaternion() * Vector((0, 1, 0))
+  else:
+    cam_behind = camera.matrix_world.to_quaternion() @ Vector((0, 0, -1))
+    cam_left = camera.matrix_world.to_quaternion() @ Vector((-1, 0, 0))
+    cam_up = camera.matrix_world.to_quaternion() @ Vector((0, 1, 0))
+
   plane_behind = (cam_behind - cam_behind.project(plane_normal)).normalized()
   plane_left = (cam_left - cam_left.project(plane_normal)).normalized()
   plane_up = cam_up.project(plane_normal).normalized()
@@ -395,7 +416,7 @@ def add_random_objects(scene_struct, num_objects, args, camera):
 
     # Choose random color and shape
     if shape_color_combos is None:
-      obj_name, obj_name_out = random.choice(object_mapping)
+      obj_name, obj_name_out = random.choice(object_mapping) # TODO: select shapes here
       color_name, rgba = random.choice(list(color_name_to_rgba.items()))
     else:
       obj_name_out, color_choices = random.choice(shape_color_combos)
@@ -433,14 +454,15 @@ def add_random_objects(scene_struct, num_objects, args, camera):
     })
 
   # Check that all objects are at least partially visible in the rendered image
-  all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
-  if not all_visible:
-    # If any of the objects are fully occluded then start over; delete all
-    # objects from the scene and place them all again.
-    print('Some objects are occluded; replacing objects')
-    for obj in blender_objects:
-      utils.delete_object(obj)
-    return add_random_objects(scene_struct, num_objects, args, camera)
+  if False: # skipping for now
+    all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
+    if not all_visible:
+      # If any of the objects are fully occluded then start over; delete all
+      # objects from the scene and place them all again.
+      print('Some objects are occluded; replacing objects')
+      for obj in blender_objects:
+        utils.delete_object(obj)
+      return add_random_objects(scene_struct, num_objects, args, camera)
 
   return objects, blender_objects
 
@@ -483,13 +505,23 @@ def check_visibility(blender_objects, min_pixels_per_object):
 
   Returns True if all objects are visible and False otherwise.
   """
-  f, path = tempfile.mkstemp(suffix='.png')
+  # f, path = tempfile.mkstemp(suffix='.png')
+  path = "/Users/annawei/Tech/IVL/clevr-original/clevr-dataset-gen/check_visibility.png"
   object_colors = render_shadeless(blender_objects, path=path)
   img = bpy.data.images.load(path)
   p = list(img.pixels)
-  color_count = Counter((p[i], p[i+1], p[i+2], p[i+3])
-                        for i in range(0, len(p), 4))
-  os.remove(path)
+  print(len(p))
+  print(p[0])
+  print(p[1])
+  print(p[2])
+  print(p[3])
+
+  color_count = Counter( (p[i], p[i+1], p[i+2], p[i+3])
+                        for i in range(0, len(p), 4) )
+  # os.remove(path)
+  print(len(color_count))
+  print(len(blender_objects))
+
   if len(color_count) != len(blender_objects) + 1:
     return False
   for _, count in color_count.most_common():
@@ -510,18 +542,27 @@ def render_shadeless(blender_objects, path='flat.png'):
   # Cache the render args we are about to clobber
   old_filepath = render_args.filepath
   old_engine = render_args.engine
-  old_use_antialiasing = render_args.use_antialiasing
+  old_use_antialiasing = bpy.context.scene.display.render_aa # render_args.use_antialiasing # bpy.context.view_layer.use_antialiasing
+ 
 
   # Override some render settings to have flat shading
   render_args.filepath = path
-  render_args.engine = 'BLENDER_RENDER'
-  render_args.use_antialiasing = False
+  # https://www.quora.com/Why-are-there-3-render-engines-in-Blender-What-is-the-difference-between-Cycles-Workbench-and-Eevee-render-engines
+  render_args.engine = 'BLENDER_WORKBENCH' #'BLENDER_EEVEE', 'BLENDER_WORKBENCH', 'CYCLES') BLENDER_RENDER
+  # https://blender.stackexchange.com/questions/158408/turning-off-anti-aliasing-inconsistency-between-info-window-and-valid-python
+  bpy.context.scene.display.render_aa = 'OFF' # render_args.use_antialiasing = False
 
   # Move the lights and ground to layer 2 so they don't render
-  utils.set_layer(bpy.data.objects['Lamp_Key'], 2)
-  utils.set_layer(bpy.data.objects['Lamp_Fill'], 2)
-  utils.set_layer(bpy.data.objects['Lamp_Back'], 2)
-  utils.set_layer(bpy.data.objects['Ground'], 2)
+  bpy.data.objects['Lamp_Key'].hide_render = True # select_set(False)
+  bpy.data.objects['Lamp_Fill'].hide_render = True 
+  bpy.data.objects['Lamp_Back'].hide_render = True 
+  # https://docs.blender.org/api/current/bpy.types.Object.html?#bpy.types.Object.data
+  # https://wiki.blender.org/wiki/Reference/Release_Notes/2.80/Python_API/Scene_and_Object_API
+  bpy.data.objects['Ground'].hide_render = True 
+  # utils.set_layer(bpy.data.objects['Lamp_Key'], 2)
+  # utils.set_layer(bpy.data.objects['Lamp_Fill'], 2)
+  # utils.set_layer(bpy.data.objects['Lamp_Back'], 2)
+  # utils.set_layer(bpy.data.objects['Ground'], 2)
 
   # Add random shadeless materials to all objects
   object_colors = set()
@@ -534,9 +575,10 @@ def render_shadeless(blender_objects, path='flat.png'):
     while True:
       r, g, b = [random.random() for _ in range(3)]
       if (r, g, b) not in object_colors: break
-    object_colors.add((r, g, b))
-    mat.diffuse_color = [r, g, b]
-    mat.use_shadeless = True
+    object_colors.add((r, g, b, 1))
+    mat.diffuse_color = [r, g, b, 1]
+   
+    mat.shadow_method = 'NONE'  # mat.use_shadeless = True # https://blender.stackexchange.com/questions/131015/where-is-shadeless-material-option-for-blender-2-8
     obj.data.materials[0] = mat
 
   # Render the scene
@@ -547,16 +589,20 @@ def render_shadeless(blender_objects, path='flat.png'):
     obj.data.materials[0] = mat
 
   # Move the lights and ground back to layer 0
-  utils.set_layer(bpy.data.objects['Lamp_Key'], 0)
-  utils.set_layer(bpy.data.objects['Lamp_Fill'], 0)
-  utils.set_layer(bpy.data.objects['Lamp_Back'], 0)
-  utils.set_layer(bpy.data.objects['Ground'], 0)
+  # utils.set_layer(bpy.data.objects['Lamp_Key'], 0)
+  # utils.set_layer(bpy.data.objects['Lamp_Fill'], 0)
+  # utils.set_layer(bpy.data.objects['Lamp_Back'], 0)
+  # utils.set_layer(bpy.data.objects['Ground'], 0)
+  bpy.data.objects['Lamp_Key'].hide_render = False  
+  bpy.data.objects['Lamp_Fill'].hide_render = False  
+  bpy.data.objects['Lamp_Back'].hide_render = False  
+  bpy.data.objects['Ground'].hide_render = False  
 
   # Set the render settings back to what they were
   render_args.filepath = old_filepath
   render_args.engine = old_engine
-  render_args.use_antialiasing = old_use_antialiasing
-
+  bpy.context.scene.display.render_aa = old_use_antialiasing # render_args.use_antialiasing = old_use_antialiasing
+  
   return object_colors
 
 
