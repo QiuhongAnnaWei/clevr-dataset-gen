@@ -6,7 +6,7 @@
 # of patent rights can be found in the PATENTS file in the same directory.
 
 from __future__ import print_function
-import math, sys, random, argparse, json, os, tempfile
+import math, sys, random, argparse, json, os, tempfile, shutil
 from datetime import datetime as dt
 from collections import Counter
 
@@ -454,15 +454,14 @@ def add_random_objects(scene_struct, num_objects, args, camera):
     })
 
   # Check that all objects are at least partially visible in the rendered image
-  if False: # skipping for now
-    all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
-    if not all_visible:
-      # If any of the objects are fully occluded then start over; delete all
-      # objects from the scene and place them all again.
-      print('Some objects are occluded; replacing objects')
-      for obj in blender_objects:
-        utils.delete_object(obj)
-      return add_random_objects(scene_struct, num_objects, args, camera)
+  all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
+  if not all_visible:
+    # If any of the objects are fully occluded then start over; delete all
+    # objects from the scene and place them all again.
+    print('Some objects are occluded; replacing objects')
+    for obj in blender_objects:
+      utils.delete_object(obj)
+    return add_random_objects(scene_struct, num_objects, args, camera)
 
   return objects, blender_objects
 
@@ -505,8 +504,7 @@ def check_visibility(blender_objects, min_pixels_per_object):
 
   Returns True if all objects are visible and False otherwise.
   """
-  # f, path = tempfile.mkstemp(suffix='.png')
-  path = "/Users/annawei/Tech/IVL/clevr-original/clevr-dataset-gen/check_visibility.png"
+  f, path = tempfile.mkstemp(suffix='.png')
   object_colors = render_shadeless(blender_objects, path=path)
   img = bpy.data.images.load(path)
   p = list(img.pixels)
@@ -518,7 +516,13 @@ def check_visibility(blender_objects, min_pixels_per_object):
 
   color_count = Counter( (p[i], p[i+1], p[i+2], p[i+3])
                         for i in range(0, len(p), 4) )
-  # os.remove(path)
+  
+  if False:  # Save flat image for debugging.
+    perma_path = '/Users/jiviteshjain/Documents/IIIT/Brown/fields/clevr-dataset-gen/image_generation/temp.png'
+    shutil.copy(path, perma_path)
+
+  os.remove(path)
+  
   print(len(color_count))
   print(len(blender_objects))
 
@@ -543,7 +547,8 @@ def render_shadeless(blender_objects, path='flat.png'):
   old_filepath = render_args.filepath
   old_engine = render_args.engine
   old_use_antialiasing = bpy.context.scene.display.render_aa # render_args.use_antialiasing # bpy.context.view_layer.use_antialiasing
- 
+  old_light = bpy.data.scenes['Scene'].display.shading.light
+  old_color_type = bpy.data.scenes['Scene'].display.shading.color_type
 
   # Override some render settings to have flat shading
   render_args.filepath = path
@@ -563,6 +568,10 @@ def render_shadeless(blender_objects, path='flat.png'):
   # utils.set_layer(bpy.data.objects['Lamp_Fill'], 2)
   # utils.set_layer(bpy.data.objects['Lamp_Back'], 2)
   # utils.set_layer(bpy.data.objects['Ground'], 2)
+
+  bpy.data.scenes['Scene'].display.shading.light = 'FLAT'
+  bpy.data.scenes['Scene'].display.shading.color_type = 'TEXTURE'
+  # https://blenderartists.org/t/shadeless-in-2-9/1294517/4
 
   # Add random shadeless materials to all objects
   object_colors = set()
@@ -602,6 +611,8 @@ def render_shadeless(blender_objects, path='flat.png'):
   render_args.filepath = old_filepath
   render_args.engine = old_engine
   bpy.context.scene.display.render_aa = old_use_antialiasing # render_args.use_antialiasing = old_use_antialiasing
+  bpy.data.scenes['Scene'].display.shading.light = old_light
+  bpy.data.scenes['Scene'].display.shading.color_type = old_color_type
   
   return object_colors
 
